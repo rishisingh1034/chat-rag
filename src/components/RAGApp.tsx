@@ -49,17 +49,18 @@ export default function RAGApp() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState('text');
   const [expandedSources, setExpandedSources] = useState<string[]>([]);
+  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
+  const [displayedContent, setDisplayedContent] = useState<{ [key: string]: string }>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages are added
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, isLoading]);
 
   const toggleSourceExpansion = (messageId: string) => {
-    setExpandedSources(prev => 
-      prev.includes(messageId) 
+    setExpandedSources(prev =>
+      prev.includes(messageId)
         ? prev.filter(id => id !== messageId)
         : [...prev, messageId]
     );
@@ -207,43 +208,146 @@ export default function RAGApp() {
     };
 
     setChatMessages(prev => [...prev, userMessage]);
+    const currentQuery = chatInput;
     setChatInput('');
     setIsLoading(true);
 
+    const assistantMessageId = (Date.now() + 1).toString();
+    let assistantMessageCreated = false;
+
     try {
-      const response = await fetch('/api/query', {
+      const response = await fetch('/api/query-stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ query: chatInput }),
+        body: JSON.stringify({ query: currentQuery }),
       });
 
-      const data = await response.json();
+      if (!response.body) {
+        throw new Error('No response body');
+      }
 
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.answer || 'Sorry, I could not process your request.',
-        timestamp: new Date(),
-        sources: data.sources || [],
-        confidence: data.confidence || 0,
-      };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let currentContent = '';
+      let sources: SourceInfo[] = [];
+      let confidence = 0;
 
-      setChatMessages(prev => [...prev, assistantMessage]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.trim()) {
+            try {
+              const chunk = JSON.parse(line);
+
+              if (chunk.type === 'chunk') {
+                // Create assistant message on first chunk
+                if (!assistantMessageCreated) {
+                  const assistantMessage: ChatMessage = {
+                    id: assistantMessageId,
+                    role: 'assistant',
+                    content: '',
+                    timestamp: new Date(),
+                    sources: [],
+                    confidence: 0,
+                  };
+
+                  setChatMessages(prev => [...prev, assistantMessage]);
+                  setTypingMessageId(assistantMessageId);
+                  setDisplayedContent(prev => ({ ...prev, [assistantMessageId]: '' }));
+                  assistantMessageCreated = true;
+
+                  // Stop showing "Analyzing documents..." once we start streaming
+                  setIsLoading(false);
+                }
+
+                currentContent += chunk.data;
+
+                // Add a small delay to make typing more natural
+                await new Promise(resolve => setTimeout(resolve, 20));
+
+                setDisplayedContent(prev => ({
+                  ...prev,
+                  [assistantMessageId]: currentContent
+                }));
+
+                // Update the message content
+                setChatMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: currentContent }
+                    : msg
+                ));
+              } else if (chunk.type === 'sources') {
+                sources = chunk.data;
+              } else if (chunk.type === 'confidence') {
+                confidence = chunk.data;
+              } else if (chunk.type === 'error') {
+                currentContent = chunk.data;
+                setDisplayedContent(prev => ({
+                  ...prev,
+                  [assistantMessageId]: currentContent
+                }));
+                setChatMessages(prev => prev.map(msg =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, content: currentContent }
+                    : msg
+                ));
+                break;
+              }
+            } catch (e) {
+              console.error('Error parsing chunk:', e);
+            }
+          }
+        }
+      }
+
+      // Update final message with sources and confidence
+      setChatMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? { ...msg, sources, confidence }
+          : msg
+      ));
+
+      setTypingMessageId(null);
     } catch (error) {
       console.error('Error sending message:', error);
-      const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'Sorry, there was an error processing your request. Please make sure the server is running and try again.',
-        timestamp: new Date(),
-        sources: [],
-        confidence: 0,
-      };
-      setChatMessages(prev => [...prev, errorMessage]);
-    } finally {
       setIsLoading(false);
+      const errorContent = 'Sorry, there was an error processing your request. Please make sure the server is running and try again.';
+
+      // Create assistant message if it wasn't created yet
+      if (!assistantMessageCreated) {
+        const assistantMessage: ChatMessage = {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: errorContent,
+          timestamp: new Date(),
+          sources: [],
+          confidence: 0,
+        };
+        setChatMessages(prev => [...prev, assistantMessage]);
+      } else {
+        // Update existing message
+        setDisplayedContent(prev => ({
+          ...prev,
+          [assistantMessageId]: errorContent
+        }));
+
+        setChatMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId
+            ? { ...msg, content: errorContent }
+            : msg
+        ));
+      }
+
+      setTypingMessageId(null);
     }
   };
 
@@ -295,7 +399,7 @@ export default function RAGApp() {
           <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
             <Brain className="w-5 h-5 text-white" />
           </div>
-          <span className="text-xl font-semibold">RAG AI</span>
+          <span className="text-xl font-semibold">Askvault</span>
         </div>
 
         <div className="flex items-center space-x-4">
@@ -497,8 +601,8 @@ export default function RAGApp() {
                     </div>
                   ) : (
                     chatMessages.map((message, index) => (
-                      <div 
-                        key={message.id} 
+                      <div
+                        key={message.id}
                         className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-in`}
                         style={{ animationDelay: `${index * 0.1}s` }}
                       >
@@ -513,7 +617,7 @@ export default function RAGApp() {
                               <Bot className="w-5 h-5 text-white" />
                             )}
                           </div>
-                          
+
                           <div className="flex-1 space-y-2">
                             {/* Message Content */}
                             <div className={`px-4 py-3 rounded-2xl shadow-lg ${message.role === 'user'
@@ -522,23 +626,30 @@ export default function RAGApp() {
                               }`}>
                               <div className="prose prose-sm max-w-none">
                                 {message.role === 'assistant' ? (
-                                  <div 
-                                    className="text-sm leading-relaxed"
-                                    dangerouslySetInnerHTML={{
-                                      __html: message.content
-                                        .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-white">$1</strong>')
-                                        .replace(/`(.*?)`/g, '<code class="bg-black/20 px-1 py-0.5 rounded text-blue-200 font-mono text-xs">$1</code>')
-                                        .replace(/\n/g, '<br>')
-                                    }}
-                                  />
+                                  <div className="text-sm leading-relaxed">
+                                    <div
+                                      dangerouslySetInnerHTML={{
+                                        __html: (typingMessageId === message.id
+                                          ? (displayedContent[message.id] || '')
+                                          : message.content
+                                        )
+                                          .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-white">$1</strong>')
+                                          .replace(/`(.*?)`/g, '<code class="bg-black/20 px-1 py-0.5 rounded text-blue-200 font-mono text-xs">$1</code>')
+                                          .replace(/\n/g, '<br>')
+                                      }}
+                                    />
+                                    {typingMessageId === message.id && (
+                                      <span className="inline-block w-2 h-4 bg-white ml-1 animate-pulse">|</span>
+                                    )}
+                                  </div>
                                 ) : (
                                   <p className="text-sm leading-relaxed">{message.content}</p>
                                 )}
                               </div>
                             </div>
-                            
+
                             {/* Confidence and Sources for Assistant Messages */}
-                            {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
+                            {message.role === 'assistant' && message.sources && message.sources.length > 0 && typingMessageId !== message.id && (
                               <div className="space-y-2">
                                 {/* Confidence Badge */}
                                 {message.confidence !== undefined && message.confidence > 0 && (
@@ -551,7 +662,7 @@ export default function RAGApp() {
                                     </div>
                                   </div>
                                 )}
-                                
+
                                 {/* Sources Toggle */}
                                 <button
                                   onClick={() => toggleSourceExpansion(message.id)}
@@ -559,20 +670,19 @@ export default function RAGApp() {
                                 >
                                   <BookOpen className="w-3 h-3 group-hover:scale-110 transition-transform" />
                                   <span>{message.sources.length} source{message.sources.length !== 1 ? 's' : ''}</span>
-                                  <div className={`transform transition-transform ${
-                                    expandedSources.includes(message.id) ? 'rotate-180' : ''
-                                  }`}>
+                                  <div className={`transform transition-transform ${expandedSources.includes(message.id) ? 'rotate-180' : ''
+                                    }`}>
                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                     </svg>
                                   </div>
                                 </button>
-                                
+
                                 {/* Expanded Sources */}
                                 {expandedSources.includes(message.id) && (
                                   <div className="space-y-2 animate-slide-down">
                                     {message.sources.map((source, sourceIndex) => (
-                                      <div 
+                                      <div
                                         key={sourceIndex}
                                         className="bg-black/20 rounded-lg p-3 border border-white/5 hover:border-white/10 transition-colors"
                                       >
@@ -600,9 +710,9 @@ export default function RAGApp() {
                                           {source.snippet}
                                         </p>
                                         {source.documentType === 'url' && (
-                                          <a 
-                                            href={source.documentName} 
-                                            target="_blank" 
+                                          <a
+                                            href={source.documentName}
+                                            target="_blank"
                                             rel="noopener noreferrer"
                                             className="inline-flex items-center space-x-1 mt-2 text-xs text-blue-400 hover:text-blue-300 transition-colors"
                                           >
@@ -630,9 +740,9 @@ export default function RAGApp() {
                         <div className="bg-white/10 backdrop-blur-sm px-4 py-3 rounded-2xl border border-white/10 shadow-lg">
                           <div className="flex items-center space-x-3">
                             <div className="flex space-x-1">
-                              <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
-                              <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
-                              <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                              <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                              <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                              <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                             </div>
                             <span className="text-sm text-gray-300">Analyzing documents...</span>
                           </div>

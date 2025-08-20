@@ -33,6 +33,12 @@ interface SourceInfo {
   snippet: string;
 }
 
+type StreamChunk = 
+  | { type: 'chunk'; data: string }
+  | { type: 'sources'; data: SourceInfo[] }
+  | { type: 'confidence'; data: number }
+  | { type: 'error'; data: string };
+
 export class RAGService {
   private static instance: RAGService;
   private documents: DocumentData[] = [];
@@ -308,12 +314,10 @@ export class RAGService {
         }
       );
 
-      // Create retriever for similarity search with more results
       const retriever = vectorStore.asRetriever({
-        k: 5, // Get top 5 most relevant chunks for better context
+        k: 5,
       });
 
-      // Get relevant chunks with similarity scores
       const relevantChunks = await retriever.invoke(query);
 
       if (relevantChunks.length === 0) {
@@ -337,7 +341,6 @@ export class RAGService {
         };
       });
 
-      // Enhanced system prompt with better formatting instructions
       const SYSTEM_PROMPT = `
         You are an AI assistant that provides accurate, well-formatted answers based on uploaded documents.
         
@@ -368,12 +371,11 @@ export class RAGService {
           { role: 'user', content: query },
         ],
         max_tokens: 1500,
-        temperature: 0.3, // Lower temperature for more consistent responses
+        temperature: 0.3,
       });
 
       const answer = response.choices[0]?.message?.content || 'I could not generate a response.';
 
-      // Calculate confidence based on relevance and response quality
       const confidence = Math.min(0.95, 0.7 + (relevantChunks.length * 0.05));
 
       return {
@@ -387,6 +389,131 @@ export class RAGService {
         answer: 'Sorry, I encountered an error while processing your query. Please make sure Qdrant is running and your OpenAI API key is configured properly.',
         sources: [],
         confidence: 0
+      };
+    }
+  }
+
+  async *queryDocumentsStream(query: string): AsyncGenerator<StreamChunk> {
+    try {
+      // Handle edge cases
+      if (!query || query.trim().length === 0) {
+        yield {
+          type: 'error',
+          data: 'Please provide a valid question to search for.'
+        };
+        return;
+      }
+
+      if (this.documents.length === 0) {
+        yield {
+          type: 'error',
+          data: 'No documents have been added yet. Please upload some documents first to get started.'
+        };
+        return;
+      }
+
+      // Connect to existing Qdrant collection
+      const vectorStore = await QdrantVectorStore.fromExistingCollection(
+        this.embeddings,
+        {
+          url: this.QDRANT_URL,
+          collectionName: this.COLLECTION_NAME,
+          apiKey: this.QDRANT_API_KEY,
+        }
+      );
+
+      // Create retriever for similarity search
+      const retriever = vectorStore.asRetriever({
+        k: 5,
+      });
+
+      // Get relevant chunks
+      const relevantChunks = await retriever.invoke(query);
+
+      if (relevantChunks.length === 0) {
+        yield {
+          type: 'error',
+          data: 'I could not find any relevant information in the uploaded documents. Try rephrasing your question or adding more specific documents.'
+        };
+        return;
+      }
+
+      // Extract source information
+      const sources: SourceInfo[] = relevantChunks.map((chunk, index) => {
+        const metadata = chunk.metadata;
+        return {
+          documentName: metadata.source || 'Unknown Document',
+          documentType: metadata.type || 'unknown',
+          pageNumber: metadata.loc?.pageNumber || metadata.page || undefined,
+          chunkIndex: metadata.chunkIndex || index,
+          relevanceScore: 0.9 - (index * 0.1),
+          snippet: chunk.pageContent.substring(0, 150) + (chunk.pageContent.length > 150 ? '...' : '')
+        };
+      });
+
+      // Send sources first
+      yield {
+        type: 'sources',
+        data: sources
+      };
+
+      // Calculate confidence
+      const confidence = Math.min(0.95, 0.7 + (relevantChunks.length * 0.05));
+      yield {
+        type: 'confidence',
+        data: confidence
+      };
+
+      // Enhanced system prompt
+      const SYSTEM_PROMPT = `
+        You are an AI assistant that provides accurate, well-formatted answers based on uploaded documents.
+        
+        IMPORTANT INSTRUCTIONS:
+        1. Only answer based on the provided context from the documents
+        2. If the answer cannot be found in the context, say so clearly
+        3. Format your response with proper markdown for better readability
+        4. Use bullet points, numbered lists, or code blocks when appropriate
+        5. For technical content like data types, use proper formatting:
+           - Use **bold** for important terms
+           - Use \`code\` formatting for technical terms, variables, or data types
+           - Use code blocks for longer code examples
+        6. Be comprehensive but concise
+        7. If discussing data types or technical specifications, format them clearly
+        
+        Context from documents:
+        ${relevantChunks.map((chunk, i) => `
+        [Source ${i + 1}: ${chunk.metadata.source}${chunk.metadata.loc?.pageNumber ? ` (Page ${chunk.metadata.loc.pageNumber})` : ''}]
+        ${chunk.pageContent}
+        `).join('\n')}
+      `;
+
+      // Generate streaming response using OpenAI
+      const stream = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: query },
+        ],
+        max_tokens: 1500,
+        temperature: 0.3,
+        stream: true,
+      });
+
+      // Stream the response chunks
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          yield {
+            type: 'chunk',
+            data: content
+          };
+        }
+      }
+    } catch (error) {
+      console.error('Streaming query processing failed:', error);
+      yield {
+        type: 'error',
+        data: 'Sorry, I encountered an error while processing your query. Please make sure Qdrant is running and your OpenAI API key is configured properly.'
       };
     }
   }
