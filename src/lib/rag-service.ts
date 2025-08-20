@@ -41,7 +41,8 @@ export class RAGService {
   private qdrantClient: QdrantClient;
   private openai: OpenAI;
   private readonly COLLECTION_NAME = 'rag-documents';
-  private readonly QDRANT_URL = 'http://localhost:6333';
+  private readonly QDRANT_URL = process.env.QDRANT_URL;
+  private readonly QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 
   private constructor() {
     this.embeddings = new OpenAIEmbeddings({
@@ -58,7 +59,11 @@ export class RAGService {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    this.qdrantClient = new QdrantClient({ url: this.QDRANT_URL });
+    this.qdrantClient = new QdrantClient({
+      url: this.QDRANT_URL,
+      apiKey: this.QDRANT_API_KEY,
+      checkCompatibility: false,
+    });
     this.initializeCollection();
   }
 
@@ -112,6 +117,7 @@ export class RAGService {
       await QdrantVectorStore.fromDocuments(docs, this.embeddings, {
         url: this.QDRANT_URL,
         collectionName: this.COLLECTION_NAME,
+        apiKey: this.QDRANT_API_KEY,
       });
 
       // Store document metadata
@@ -156,6 +162,7 @@ export class RAGService {
       await QdrantVectorStore.fromDocuments(docsWithMetadata, this.embeddings, {
         url: this.QDRANT_URL,
         collectionName: this.COLLECTION_NAME,
+        apiKey: this.QDRANT_API_KEY,
       });
 
       // Store document metadata
@@ -206,6 +213,7 @@ export class RAGService {
       await QdrantVectorStore.fromDocuments(docsWithMetadata, this.embeddings, {
         url: this.QDRANT_URL,
         collectionName: this.COLLECTION_NAME,
+        apiKey: this.QDRANT_API_KEY,
       });
 
       // Store document metadata
@@ -253,6 +261,7 @@ export class RAGService {
       await QdrantVectorStore.fromDocuments(docsWithMetadata, this.embeddings, {
         url: this.QDRANT_URL,
         collectionName: this.COLLECTION_NAME,
+        apiKey: this.QDRANT_API_KEY,
       });
 
       // Store document metadata
@@ -295,6 +304,7 @@ export class RAGService {
         {
           url: this.QDRANT_URL,
           collectionName: this.COLLECTION_NAME,
+          apiKey: this.QDRANT_API_KEY,
         }
       );
 
@@ -362,7 +372,7 @@ export class RAGService {
       });
 
       const answer = response.choices[0]?.message?.content || 'I could not generate a response.';
-      
+
       // Calculate confidence based on relevance and response quality
       const confidence = Math.min(0.95, 0.7 + (relevantChunks.length * 0.05));
 

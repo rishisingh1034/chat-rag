@@ -307,7 +307,7 @@ export default function RAGApp() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 flex-1 p-6">
+      <main className="relative z-10 flex-1 p-6 min-h-0">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
 
           {/* Left Panel - Document Management */}
@@ -463,8 +463,8 @@ export default function RAGApp() {
 
           {/* Right Panel - Chat Interface */}
           <div className="lg:col-span-2">
-            <Card className="glass-effect border-white/10 h-full flex flex-col">
-              <CardHeader className="border-b border-white/10">
+            <Card className="glass-effect border-white/10 h-[calc(100vh-12rem)] flex flex-col">
+              <CardHeader className="border-b border-white/10 flex-shrink-0">
                 <CardTitle className="text-white flex items-center">
                   <MessageSquare className="w-5 h-5 mr-2" />
                   AI Assistant
@@ -473,9 +473,9 @@ export default function RAGApp() {
                   Ask questions about your documents
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex-1 flex flex-col p-0">
+              <CardContent className="flex-1 flex flex-col p-0 min-h-0">
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 min-h-0">
                   {chatMessages.length === 0 ? (
                     <div className="text-center py-12 animate-fade-in">
                       <div className="relative">
@@ -644,7 +644,7 @@ export default function RAGApp() {
                 </div>
 
                 {/* Input */}
-                <div className="border-t border-white/10 p-6">
+                <div className="border-t border-white/10 p-6 flex-shrink-0">
                   <div className="flex space-x-3">
                     <Input
                       value={chatInput}
