@@ -1,53 +1,85 @@
-# RAG Application
+# RAG AI Chat Application 🤖
 
-A powerful Retrieval Augmented Generation (RAG) application built with Next.js that allows you to upload documents, scrape websites, and chat with your data using AI.
+A modern, feature-rich Retrieval Augmented Generation (RAG) application built with Next.js that allows you to upload documents, scrape websites, and chat with your data using AI. Features include source citations, confidence scores, scrollable chat, and enhanced UI with animations.
 
-## Features
+## ✨ Features
 
-- **Multiple Data Sources**: Support for text input, file uploads (PDF, CSV, TXT), and website content
-- **Document Processing**: Automatic text extraction and chunking for optimal retrieval
-- **Vector Storage**: In-memory vector storage for fast similarity search
-- **AI-Powered Chat**: Query your documents using natural language with OpenAI GPT
-- **Modern UI**: Clean, responsive interface built with Tailwind CSS
-- **Real-time Updates**: Live document management and chat interface
+### 🔄 **Multiple Data Sources**
+- **Text Input**: Direct text input with rich formatting
+- **File Upload**: Support for PDF, CSV, and TXT files with drag & drop
+- **Website Scraping**: Extract and index content from any URL
 
-## Tech Stack
+### 🧠 **Advanced AI Chat**
+- **Source Citations**: See exactly which documents and page numbers information comes from
+- **Confidence Scores**: AI confidence indicators for each response
+- **Rich Formatting**: Proper markdown rendering with code highlighting
+- **Scrollable Interface**: Smooth auto-scrolling chat with enhanced UX
+
+### 🎨 **Enhanced UI/UX**
+- **Modern Design**: Dark theme with glass morphism effects
+- **Smooth Animations**: Slide-in animations and transitions
+- **Responsive Layout**: Works perfectly on desktop and mobile
+- **Interactive Elements**: Expandable sources, hover effects, and loading states
+
+### 🔍 **Smart Document Processing**
+- **Intelligent Chunking**: Optimized text splitting for better retrieval
+- **Vector Storage**: Cloud-based Qdrant vector database
+- **Metadata Preservation**: Maintains document structure and page numbers
+- **Edge Case Handling**: Robust error handling and validation
+
+## 🛠️ Tech Stack
 
 - **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS
-- **AI/ML**: LangChain, OpenAI GPT-3.5-turbo, OpenAI Embeddings
-- **Document Processing**: PDF-parse, Cheerio (web scraping), CSV-parser
-- **UI Components**: Lucide React icons, React Dropzone, Radix UI
+- **AI/ML**: LangChain, OpenAI GPT-4o-mini, OpenAI Embeddings (text-embedding-3-large)
+- **Vector Database**: Qdrant Cloud (persistent vector storage)
+- **Document Processing**: LangChain PDF/CSV loaders, Cheerio (web scraping)
+- **UI Components**: Lucide React icons, Radix UI, Custom animations
+- **Styling**: Custom CSS animations, Glass morphism effects, Dark theme
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ 
-- OpenAI API key
+- **Node.js 18+** 
+- **OpenAI API key** (for AI chat and embeddings)
+- **Qdrant Cloud account** (vector database - already configured)
 
-### Installation
+### 💻 Installation
 
-1. **Clone and install dependencies**:
+1. **Clone the repository**:
    ```bash
-   npm install --legacy-peer-deps
+   git clone <repository-url>
+   cd rag-app
    ```
 
-2. **Set up environment variables**:
+2. **Install dependencies**:
    ```bash
-   cp env.example .env.local
+   npm install
+   ```
+
+3. **Set up environment variables**:
+   ```bash
+   cp .env.example .env
    ```
    
-   Edit `.env.local` and add your OpenAI API key:
+   Edit `.env` and add your OpenAI API key:
    ```env
    OPENAI_API_KEY=your_openai_api_key_here
+   QDRANT_URL=https://your-qdrant-cluster-url:6333
+   QDRANT_API_KEY=your_qdrant_api_key
    ```
 
-3. **Run the development server**:
+4. **Build the application**:
+   ```bash
+   npm run build
+   ```
+
+5. **Run the development server**:
    ```bash
    npm run dev
    ```
 
-4. **Open your browser**:
+6. **Open your browser**:
    Navigate to [http://localhost:3000](http://localhost:3000)
 
 ## Usage
