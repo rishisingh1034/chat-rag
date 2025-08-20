@@ -41,6 +41,7 @@ A modern, feature-rich Retrieval Augmented Generation (RAG) application built wi
 ### Prerequisites
 
 - **Node.js 18+** 
+- **pnpm** (package manager)
 - **OpenAI API key** (for AI chat and embeddings)
 - **Qdrant Cloud account** (vector database - already configured)
 
@@ -52,9 +53,14 @@ A modern, feature-rich Retrieval Augmented Generation (RAG) application built wi
    cd rag-app
    ```
 
-2. **Install dependencies**:
+2. **Install pnpm** (if not already installed):
    ```bash
-   npm install
+   npm install -g pnpm
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pnpm install
    ```
 
 3. **Set up environment variables**:
@@ -69,17 +75,17 @@ A modern, feature-rich Retrieval Augmented Generation (RAG) application built wi
    QDRANT_API_KEY=your_qdrant_api_key
    ```
 
-4. **Build the application**:
+5. **Build the application**:
    ```bash
-   npm run build
+   pnpm run build
    ```
 
-5. **Run the development server**:
+6. **Run the development server**:
    ```bash
-   npm run dev
+   pnpm run dev
    ```
 
-6. **Open your browser**:
+7. **Open your browser**:
    Navigate to [http://localhost:3000](http://localhost:3000)
 
 ## Usage
