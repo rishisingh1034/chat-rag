@@ -127,35 +127,87 @@ src/
     └── utils.ts       # Utility functions
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 The application uses the following environment variables:
 
-- `OPENAI_API_KEY`: Your OpenAI API key for embeddings and chat completion
+```env
+# Required
+OPENAI_API_KEY=your_openai_api_key_here
 
-## Limitations
+# Qdrant Cloud (already configured)
+QDRANT_URL=https://your-qdrant-cluster-url:6333
+QDRANT_API_KEY=your_qdrant_api_key
+```
 
-- Uses in-memory vector storage (data is lost on restart)
-- Requires OpenAI API key (costs apply)
-- Website scraping may be limited by CORS and rate limiting
-- File size limits apply for uploads
+## 🚀 Deployment
 
-## Future Enhancements
+### Vercel (Recommended)
 
-- Persistent vector storage (e.g., Pinecone, Weaviate)
-- Support for more file formats (DOCX, PPTX)
-- User authentication and document management
-- Advanced chunking strategies
-- Multiple AI model support
+1. **Push to GitHub**:
+   ```bash
+   git add .
+   git commit -m "Initial commit"
+   git push origin main
+   ```
 
-## Troubleshooting
+2. **Deploy to Vercel**:
+   - Connect your GitHub repository to Vercel
+   - Add environment variables in Vercel dashboard
+   - Deploy automatically
 
-### Common Issues
+3. **Environment Variables in Vercel**:
+   - `OPENAI_API_KEY`
+   - `QDRANT_URL`
+   - `QDRANT_API_KEY`
 
-1. **"Cannot find module" errors**: Run `npm install --legacy-peer-deps`
-2. **OpenAI API errors**: Verify your API key in `.env.local`
-3. **File upload failures**: Check file format and size limits
-4. **Website scraping fails**: Some sites block automated requests
+### Other Platforms
+
+- **Netlify**: Works with static export
+- **Railway**: Full-stack deployment
+- **Docker**: Containerized deployment
+
+## ⚠️ Limitations
+
+- **API Costs**: OpenAI API usage charges apply
+- **File Size**: Limited by platform constraints
+- **Website Scraping**: Some sites block automated requests
+- **Rate Limits**: OpenAI and Qdrant have rate limits
+
+## 🕰️ Future Enhancements
+
+- **Typing Effect**: Real-time typing animation for responses
+- **Multiple File Formats**: DOCX, PPTX, XLSX support
+- **User Authentication**: Multi-user support
+- **Advanced Analytics**: Usage tracking and insights
+- **Custom Models**: Support for other AI providers
+
+## 🔧 Troubleshooting
+
+### Build Issues
+
+1. **Missing dependencies**:
+   ```bash
+   npm install @langchain/textsplitters
+   npm run build
+   ```
+
+2. **TypeScript errors**: Check interface definitions in UI components
+
+3. **ESLint errors**: Use type aliases instead of empty interfaces
+
+### Runtime Issues
+
+1. **OpenAI API errors**: Verify API key and check billing
+2. **Qdrant connection**: Ensure cloud instance is running
+3. **File upload failures**: Check file format and size
+4. **Website scraping fails**: CORS and rate limiting issues
+
+### Performance Issues
+
+1. **Slow responses**: Check OpenAI API status
+2. **Memory issues**: Large documents may cause problems
+3. **Network timeouts**: Increase timeout values
 
 ## Contributing
 
