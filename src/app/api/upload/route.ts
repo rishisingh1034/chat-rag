@@ -1,34 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ragService } from '@/lib/rag-service';
+import { RAGService } from '@/lib/rag-service';
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
-
+    
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const fileType = file.type;
+    const fileName = file.name;
+    
     let documentId: string;
-
-    if (file.type === 'application/pdf') {
-      documentId = await ragService.addPDFDocument(buffer, file.name);
-    } else if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
-      const csvText = buffer.toString('utf-8');
-      documentId = await ragService.addCSVDocument(csvText, file.name);
-    } else if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
-      const text = buffer.toString('utf-8');
-      documentId = await ragService.addTextDocument(text, file.name);
+    
+    const ragService = RAGService.getInstance();
+    
+    if (fileType === 'application/pdf') {
+      documentId = await ragService.addPDFDocument(buffer, fileName);
+    } else if (fileType === 'text/csv') {
+      documentId = await ragService.addCSVDocument(buffer, fileName);
+    } else if (fileType === 'text/plain') {
+      documentId = await ragService.addTextDocument(buffer.toString());
     } else {
       return NextResponse.json({ error: 'Unsupported file type' }, { status: 400 });
     }
-
+    
     return NextResponse.json({ 
-      success: true, 
-      documentId,
-      message: 'File uploaded and processed successfully' 
+      message: 'File uploaded and processed successfully',
+      documentId 
     });
 
   } catch (error) {

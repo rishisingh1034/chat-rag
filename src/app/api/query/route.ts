@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ragService } from '@/lib/rag-service';
+import { RAGService } from '@/lib/rag-service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,18 +9,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 });
     }
 
+    const ragService = RAGService.getInstance();
     const answer = await ragService.queryDocuments(query);
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
       answer,
-      query 
+      query
     });
-
   } catch (error) {
     console.error('Query error:', error);
     return NextResponse.json(
-      { error: 'Failed to process query. Make sure you have added documents and configured your OpenAI API key.' },
+      { error: 'Failed to process query' },
       { status: 500 }
     );
   }

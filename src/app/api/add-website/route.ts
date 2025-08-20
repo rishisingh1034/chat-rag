@@ -1,33 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ragService } from '@/lib/rag-service';
+import { RAGService } from '@/lib/rag-service';
 
 export async function POST(request: NextRequest) {
   try {
     const { url } = await request.json();
-
-    if (!url || typeof url !== 'string') {
+    
+    if (!url) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 });
     }
 
-    // Basic URL validation
-    try {
-      new URL(url);
-    } catch {
-      return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 });
-    }
-
-    const documentId = await ragService.addWebsiteContent(url);
-
+    const ragService = RAGService.getInstance();
+    const documentId = await ragService.addWebsiteDocument(url);
+    
     return NextResponse.json({ 
-      success: true, 
-      documentId,
-      message: 'Website content added successfully' 
+      message: 'Website content added successfully',
+      documentId
     });
-
   } catch (error) {
-    console.error('Add website error:', error);
+    console.error('Website processing error:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch and process website content' },
+      { error: 'Failed to process website content' },
       { status: 500 }
     );
   }

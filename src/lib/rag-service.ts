@@ -1,254 +1,314 @@
-import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
-import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
-import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
-import { OpenAIEmbeddings } from "@langchain/openai";
+import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
+import { CSVLoader } from '@langchain/community/document_loaders/fs/csv';
+import { CheerioWebBaseLoader } from '@langchain/community/document_loaders/web/cheerio';
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { OpenAIEmbeddings } from '@langchain/openai';
+import { QdrantVectorStore } from '@langchain/qdrant';
+import { QdrantClient } from '@qdrant/js-client-rest';
 import { writeFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
 import { tmpdir } from 'os';
+import { join } from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import OpenAI from 'openai';
 
-export interface DocumentData {
+interface DocumentData {
   id: string;
-  content: string;
-  metadata: {
-    source: string;
-    type: 'text' | 'pdf' | 'csv' | 'url';
-    timestamp: number;
-  };
+  name: string;
+  type: 'text' | 'pdf' | 'csv' | 'url';
+  timestamp: number;
 }
 
-class RAGService {
+export class RAGService {
+  private static instance: RAGService;
   private documents: DocumentData[] = [];
-  private apiKey: string;
-  private vectorStore: MemoryVectorStore | null = null;
   private embeddings: OpenAIEmbeddings;
   private textSplitter: RecursiveCharacterTextSplitter;
+  private qdrantClient: QdrantClient;
+  private openai: OpenAI;
+  private readonly COLLECTION_NAME = 'rag-documents';
+  private readonly QDRANT_URL = 'http://localhost:6333';
 
-  constructor() {
-    this.apiKey = process.env.OPENAI_API_KEY || '';
+  private constructor() {
     this.embeddings = new OpenAIEmbeddings({
-      openAIApiKey: this.apiKey,
+      model: 'text-embedding-3-large',
+      openAIApiKey: process.env.OPENAI_API_KEY,
     });
+
     this.textSplitter = new RecursiveCharacterTextSplitter({
       chunkSize: 1000,
       chunkOverlap: 200,
     });
+
+    this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
+    this.qdrantClient = new QdrantClient({ url: this.QDRANT_URL });
+    this.initializeCollection();
   }
 
-  async initializeVectorStore() {
-    if (!this.vectorStore) {
-      this.vectorStore = new MemoryVectorStore(this.embeddings);
+  private async initializeCollection() {
+    try {
+      // Check if collection exists, create if not
+      const collections = await this.qdrantClient.getCollections();
+      const collectionExists = collections.collections.some(
+        (col) => col.name === this.COLLECTION_NAME
+      );
+
+      if (!collectionExists) {
+        await this.qdrantClient.createCollection(this.COLLECTION_NAME, {
+          vectors: {
+            size: 3072, // text-embedding-3-large dimension
+            distance: 'Cosine',
+          },
+        });
+        console.log(`Created Qdrant collection: ${this.COLLECTION_NAME}`);
+      }
+    } catch (error) {
+      console.error('Error initializing Qdrant collection:', error);
     }
   }
 
-  async addTextDocument(text: string, source: string = 'manual_input'): Promise<string> {
-    const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    const documentData: DocumentData = {
-      id: documentId,
-      content: text,
-      metadata: {
-        source,
+  public static getInstance(): RAGService {
+    if (!RAGService.instance) {
+      RAGService.instance = new RAGService();
+    }
+    return RAGService.instance;
+  }
+
+  async addTextDocument(text: string): Promise<string> {
+    try {
+      const documentId = uuidv4();
+      const chunks = await this.textSplitter.splitText(text);
+
+      // Create documents for Qdrant
+      const docs = chunks.map((chunk, index) => ({
+        pageContent: chunk,
+        metadata: {
+          documentId,
+          source: 'text-input',
+          type: 'text',
+          timestamp: Date.now(),
+          chunkIndex: index,
+        },
+      }));
+
+      // Index documents in Qdrant
+      await QdrantVectorStore.fromDocuments(docs, this.embeddings, {
+        url: this.QDRANT_URL,
+        collectionName: this.COLLECTION_NAME,
+      });
+
+      // Store document metadata
+      this.documents.push({
+        id: documentId,
+        name: `Text Document ${this.documents.length + 1}`,
         type: 'text',
         timestamp: Date.now(),
-      },
-    };
+      });
 
-    this.documents.push(documentData);
-    await this.processAndStoreDocument(documentData);
-    
-    return documentId;
+      return documentId;
+    } catch (error) {
+      console.error('Error adding text document:', error);
+      throw new Error('Failed to add text document');
+    }
   }
 
   async addPDFDocument(buffer: Buffer, filename: string): Promise<string> {
+    const tempFilePath = join(tmpdir(), `temp_${Date.now()}_${filename}`);
+
     try {
-      // Create a temporary file for the PDF
-      const tempFilePath = join(tmpdir(), `temp_${Date.now()}_${filename}`);
       writeFileSync(tempFilePath, buffer);
-      
-      // Load PDF using LangChain PDFLoader
       const loader = new PDFLoader(tempFilePath);
       const docs = await loader.load();
-      
-      // Combine all pages into one document
-      const text = docs.map(doc => doc.pageContent).join('\n\n');
-      
-      const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const documentData: DocumentData = {
-        id: documentId,
-        content: text,
+
+      const documentId = uuidv4();
+
+      // Add metadata to documents
+      const docsWithMetadata = docs.map((doc, index) => ({
+        ...doc,
         metadata: {
+          ...doc.metadata,
+          documentId,
           source: filename,
           type: 'pdf',
           timestamp: Date.now(),
+          chunkIndex: index,
         },
-      };
+      }));
 
-      this.documents.push(documentData);
-      await this.processAndStoreDocument(documentData);
-      
-      // Clean up temporary file
-      unlinkSync(tempFilePath);
-      
+      // Index documents in Qdrant
+      await QdrantVectorStore.fromDocuments(docsWithMetadata, this.embeddings, {
+        url: this.QDRANT_URL,
+        collectionName: this.COLLECTION_NAME,
+      });
+
+      // Store document metadata
+      this.documents.push({
+        id: documentId,
+        name: filename,
+        type: 'pdf',
+        timestamp: Date.now(),
+      });
+
       return documentId;
     } catch (error) {
-      throw new Error(`Failed to process PDF: ${error}`);
+      console.error('Error processing PDF:', error);
+      throw new Error('Failed to process PDF document');
+    } finally {
+      try {
+        unlinkSync(tempFilePath);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up temporary file:', cleanupError);
+      }
     }
   }
 
-  async addCSVDocument(csvText: string, filename: string): Promise<string> {
+  async addCSVDocument(buffer: Buffer, filename: string): Promise<string> {
+    const tempFilePath = join(tmpdir(), `temp_${Date.now()}_${filename}`);
+
     try {
-      // Create a temporary file for the CSV
-      const tempFilePath = join(tmpdir(), `temp_${Date.now()}_${filename}`);
-      writeFileSync(tempFilePath, csvText);
-      
-      // Load CSV using LangChain CSVLoader
+      writeFileSync(tempFilePath, buffer);
       const loader = new CSVLoader(tempFilePath);
       const docs = await loader.load();
-      
-      // Combine all CSV rows into structured text
-      const text = docs.map(doc => doc.pageContent).join('\n');
-      
-      const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const documentData: DocumentData = {
-        id: documentId,
-        content: text,
+
+      const documentId = uuidv4();
+
+      // Add metadata to documents
+      const docsWithMetadata = docs.map((doc, index) => ({
+        ...doc,
         metadata: {
+          ...doc.metadata,
+          documentId,
           source: filename,
           type: 'csv',
           timestamp: Date.now(),
+          chunkIndex: index,
         },
-      };
+      }));
 
-      this.documents.push(documentData);
-      await this.processAndStoreDocument(documentData);
-      
-      // Clean up temporary file
-      unlinkSync(tempFilePath);
-      
+      // Index documents in Qdrant
+      await QdrantVectorStore.fromDocuments(docsWithMetadata, this.embeddings, {
+        url: this.QDRANT_URL,
+        collectionName: this.COLLECTION_NAME,
+      });
+
+      // Store document metadata
+      this.documents.push({
+        id: documentId,
+        name: filename,
+        type: 'csv',
+        timestamp: Date.now(),
+      });
+
       return documentId;
     } catch (error) {
-      throw new Error(`Failed to process CSV: ${error}`);
+      console.error('Error processing CSV:', error);
+      throw new Error('Failed to process CSV document');
+    } finally {
+      try {
+        unlinkSync(tempFilePath);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up temporary file:', cleanupError);
+      }
     }
   }
 
-  async addWebsiteContent(url: string): Promise<string> {
+  async addWebsiteDocument(url: string): Promise<string> {
     try {
-      // Load website using LangChain CheerioWebBaseLoader
-      const loader = new CheerioWebBaseLoader(url, {
-        selector: "body",
-      });
-      
+      const loader = new CheerioWebBaseLoader(url);
       const docs = await loader.load();
-      
-      // Combine all loaded content
-      const text = docs.map(doc => doc.pageContent).join('\n\n');
-      
-      const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const documentData: DocumentData = {
-        id: documentId,
-        content: text,
+
+      const documentId = uuidv4();
+
+      // Add metadata to documents
+      const docsWithMetadata = docs.map((doc, index) => ({
+        ...doc,
         metadata: {
+          ...doc.metadata,
+          documentId,
           source: url,
           type: 'url',
           timestamp: Date.now(),
+          chunkIndex: index,
         },
-      };
+      }));
 
-      this.documents.push(documentData);
-      await this.processAndStoreDocument(documentData);
-      
+      // Index documents in Qdrant
+      await QdrantVectorStore.fromDocuments(docsWithMetadata, this.embeddings, {
+        url: this.QDRANT_URL,
+        collectionName: this.COLLECTION_NAME,
+      });
+
+      // Store document metadata
+      this.documents.push({
+        id: documentId,
+        name: url,
+        type: 'url',
+        timestamp: Date.now(),
+      });
+
       return documentId;
     } catch (error) {
-      throw new Error(`Failed to fetch website content: ${error}`);
+      console.error('Error processing website:', error);
+      throw new Error('Failed to process website content');
     }
-  }
-
-  private async processAndStoreDocument(documentData: DocumentData) {
-    await this.initializeVectorStore();
-    
-    // Split text into chunks using LangChain text splitter
-    const docs = await this.textSplitter.createDocuments(
-      [documentData.content],
-      [{ ...documentData.metadata, id: documentData.id }]
-    );
-
-    // Add documents to vector store
-    if (this.vectorStore) {
-      await this.vectorStore.addDocuments(docs);
-    }
-    
-    console.log(`Processed document ${documentData.id} into ${docs.length} chunks`);
   }
 
   async queryDocuments(query: string): Promise<string> {
-    if (this.documents.length === 0) {
-      throw new Error('No documents have been added to the store');
-    }
-
-    if (!this.apiKey) {
-      return `I found ${this.documents.length} documents in the store. However, to provide AI-powered answers, please set up your OpenAI API key in the .env.local file. For now, here are the available documents: ${this.documents.map(doc => doc.metadata.source).join(', ')}`;
-    }
-
-    if (!this.vectorStore) {
-      throw new Error('Vector store not initialized');
-    }
-
     try {
-      // Perform similarity search using vector store
-      const relevantDocs = await this.vectorStore.similaritySearch(query, 4);
-
-      if (relevantDocs.length === 0) {
-        return 'I could not find any relevant information in the uploaded documents for your query.';
+      if (this.documents.length === 0) {
+        return 'No documents have been added yet. Please upload some documents first.';
       }
 
-      // Use the retrieved documents as context
-      const context = relevantDocs.map(doc => doc.pageContent).join('\n\n');
-      const response = await this.callOpenAI(query, context);
-      return response;
-    } catch (error) {
-      throw new Error(`Failed to query documents: ${error}`);
-    }
-  }
+      // Connect to existing Qdrant collection
+      const vectorStore = await QdrantVectorStore.fromExistingCollection(
+        this.embeddings,
+        {
+          url: this.QDRANT_URL,
+          collectionName: this.COLLECTION_NAME,
+        }
+      );
 
-  private async callOpenAI(query: string, context: string): Promise<string> {
-    try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a helpful assistant that answers questions based on the provided context. If the context does not contain relevant information, say so clearly.'
-            },
-            {
-              role: 'user',
-              content: `Context: ${context}\n\nQuestion: ${query}`
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 500
-        })
+      // Create retriever for similarity search
+      const retriever = vectorStore.asRetriever({
+        k: 3, // Get top 3 most relevant chunks
       });
 
-      if (!response.ok) {
-        throw new Error(`OpenAI API error: ${response.statusText}`);
+      // Get relevant chunks
+      const relevantChunks = await retriever.invoke(query);
+
+      if (relevantChunks.length === 0) {
+        return 'I could not find any relevant information in the uploaded documents.';
       }
 
-      const data = await response.json();
-      return data.choices[0]?.message?.content || 'I could not generate a response.';
+      // Prepare system prompt with context
+      const SYSTEM_PROMPT = `
+        You are an AI assistant who helps resolve user queries based on the
+        context available to you from uploaded documents.
+        
+        Only answer based on the available context from the documents.
+        If the answer cannot be found in the context, say so clearly.
+        
+        Context:
+        ${JSON.stringify(relevantChunks)}
+      `;
+
+      // Generate response using OpenAI
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: query },
+        ],
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+
+      return response.choices[0]?.message?.content || 'I could not generate a response.';
     } catch (error) {
-      console.error('OpenAI API call failed:', error);
-      return 'Sorry, I encountered an error while processing your query. Please check your OpenAI API key configuration.';
+      console.error('Query processing failed:', error);
+      return 'Sorry, I encountered an error while processing your query. Please make sure Qdrant is running and your OpenAI API key is configured.';
     }
   }
 
@@ -260,7 +320,8 @@ class RAGService {
     const index = this.documents.findIndex(doc => doc.id === documentId);
     if (index !== -1) {
       this.documents.splice(index, 1);
-      // Note: In a production app, you'd also want to remove from vector store
+      // Note: In production, you'd also want to remove from Qdrant collection
+      // This would require implementing a delete by metadata filter
       return true;
     }
     return false;
@@ -268,9 +329,8 @@ class RAGService {
 
   clearAllDocuments() {
     this.documents = [];
-    this.vectorStore = null;
+    // Note: In production, you'd also want to clear the Qdrant collection
   }
 }
 
-// Export a singleton instance
-export const ragService = new RAGService();
+
