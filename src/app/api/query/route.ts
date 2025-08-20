@@ -10,10 +10,12 @@ export async function POST(request: NextRequest) {
     }
 
     const ragService = RAGService.getInstance();
-    const answer = await ragService.queryDocuments(query);
+    const result = await ragService.queryDocuments(query);
 
     return NextResponse.json({
-      answer,
+      answer: result.answer,
+      sources: result.sources,
+      confidence: result.confidence,
       query
     });
   } catch (error) {

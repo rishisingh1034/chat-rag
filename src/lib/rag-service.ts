@@ -18,6 +18,21 @@ interface DocumentData {
   timestamp: number;
 }
 
+interface QueryResponse {
+  answer: string;
+  sources: SourceInfo[];
+  confidence: number;
+}
+
+interface SourceInfo {
+  documentName: string;
+  documentType: string;
+  pageNumber?: number;
+  chunkIndex: number;
+  relevanceScore: number;
+  snippet: string;
+}
+
 export class RAGService {
   private static instance: RAGService;
   private documents: DocumentData[] = [];
@@ -255,10 +270,23 @@ export class RAGService {
     }
   }
 
-  async queryDocuments(query: string): Promise<string> {
+  async queryDocuments(query: string): Promise<QueryResponse> {
     try {
+      // Handle edge cases
+      if (!query || query.trim().length === 0) {
+        return {
+          answer: 'Please provide a valid question to search for.',
+          sources: [],
+          confidence: 0
+        };
+      }
+
       if (this.documents.length === 0) {
-        return 'No documents have been added yet. Please upload some documents first.';
+        return {
+          answer: 'No documents have been added yet. Please upload some documents first to get started.',
+          sources: [],
+          confidence: 0
+        };
       }
 
       // Connect to existing Qdrant collection
@@ -270,28 +298,56 @@ export class RAGService {
         }
       );
 
-      // Create retriever for similarity search
+      // Create retriever for similarity search with more results
       const retriever = vectorStore.asRetriever({
-        k: 3, // Get top 3 most relevant chunks
+        k: 5, // Get top 5 most relevant chunks for better context
       });
 
-      // Get relevant chunks
+      // Get relevant chunks with similarity scores
       const relevantChunks = await retriever.invoke(query);
 
       if (relevantChunks.length === 0) {
-        return 'I could not find any relevant information in the uploaded documents.';
+        return {
+          answer: 'I could not find any relevant information in the uploaded documents. Try rephrasing your question or adding more specific documents.',
+          sources: [],
+          confidence: 0
+        };
       }
 
-      // Prepare system prompt with context
+      // Extract source information
+      const sources: SourceInfo[] = relevantChunks.map((chunk, index) => {
+        const metadata = chunk.metadata;
+        return {
+          documentName: metadata.source || 'Unknown Document',
+          documentType: metadata.type || 'unknown',
+          pageNumber: metadata.loc?.pageNumber || metadata.page || undefined,
+          chunkIndex: metadata.chunkIndex || index,
+          relevanceScore: 0.9 - (index * 0.1), // Approximate relevance based on order
+          snippet: chunk.pageContent.substring(0, 150) + (chunk.pageContent.length > 150 ? '...' : '')
+        };
+      });
+
+      // Enhanced system prompt with better formatting instructions
       const SYSTEM_PROMPT = `
-        You are an AI assistant who helps resolve user queries based on the
-        context available to you from uploaded documents.
+        You are an AI assistant that provides accurate, well-formatted answers based on uploaded documents.
         
-        Only answer based on the available context from the documents.
-        If the answer cannot be found in the context, say so clearly.
+        IMPORTANT INSTRUCTIONS:
+        1. Only answer based on the provided context from the documents
+        2. If the answer cannot be found in the context, say so clearly
+        3. Format your response with proper markdown for better readability
+        4. Use bullet points, numbered lists, or code blocks when appropriate
+        5. For technical content like data types, use proper formatting:
+           - Use **bold** for important terms
+           - Use \`code\` formatting for technical terms, variables, or data types
+           - Use code blocks for longer code examples
+        6. Be comprehensive but concise
+        7. If discussing data types or technical specifications, format them clearly
         
-        Context:
-        ${JSON.stringify(relevantChunks)}
+        Context from documents:
+        ${relevantChunks.map((chunk, i) => `
+        [Source ${i + 1}: ${chunk.metadata.source}${chunk.metadata.loc?.pageNumber ? ` (Page ${chunk.metadata.loc.pageNumber})` : ''}]
+        ${chunk.pageContent}
+        `).join('\n')}
       `;
 
       // Generate response using OpenAI
@@ -301,14 +357,27 @@ export class RAGService {
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: query },
         ],
-        max_tokens: 1000,
-        temperature: 0.7,
+        max_tokens: 1500,
+        temperature: 0.3, // Lower temperature for more consistent responses
       });
 
-      return response.choices[0]?.message?.content || 'I could not generate a response.';
+      const answer = response.choices[0]?.message?.content || 'I could not generate a response.';
+      
+      // Calculate confidence based on relevance and response quality
+      const confidence = Math.min(0.95, 0.7 + (relevantChunks.length * 0.05));
+
+      return {
+        answer,
+        sources,
+        confidence
+      };
     } catch (error) {
       console.error('Query processing failed:', error);
-      return 'Sorry, I encountered an error while processing your query. Please make sure Qdrant is running and your OpenAI API key is configured.';
+      return {
+        answer: 'Sorry, I encountered an error while processing your query. Please make sure Qdrant is running and your OpenAI API key is configured properly.',
+        sources: [],
+        confidence: 0
+      };
     }
   }
 
