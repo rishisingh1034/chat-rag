@@ -298,11 +298,12 @@ export class RAGService {
     try {
       const loader = new CheerioWebBaseLoader(url);
       const docs = await loader.load();
+      const splitDocs = await this.textSplitter.splitDocuments(docs);
 
       const documentId = uuidv4();
 
       // Add metadata to documents
-      const docsWithMetadata = docs.map((doc, index) => ({
+      const docsWithMetadata = splitDocs.map((doc, index) => ({
         ...doc,
         metadata: {
           ...doc.metadata,
