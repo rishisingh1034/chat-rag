@@ -1,3 +1,41 @@
+import dns from 'dns';
+
+// DNS lookup patch for environments where the local DNS resolver fails on Qdrant Cloud hosts
+if (typeof dns.setServers === 'function') {
+  try {
+    const originalLookup = dns.lookup;
+    
+    // Set public DNS servers for dns.resolve
+    dns.setServers(['8.8.8.8', '8.8.4.4']);
+    
+    dns.lookup = function(hostname: string, options: any, callback: any) {
+      if (typeof options === 'function') {
+        callback = options;
+        options = {};
+      }
+      
+      if (hostname && (hostname.endsWith('qdrant.io') || hostname.includes('qdrant'))) {
+        dns.resolve4(hostname, (err, addresses) => {
+          if (err || !addresses || addresses.length === 0) {
+            originalLookup(hostname, options, callback);
+          } else {
+            if (options && options.all) {
+              const results = addresses.map(addr => ({ address: addr, family: 4 }));
+              callback(null, results);
+            } else {
+              callback(null, addresses[0], 4);
+            }
+          }
+        });
+      } else {
+        originalLookup(hostname, options, callback);
+      }
+    } as any;
+  } catch (dnsPatchError) {
+    console.warn('Failed to apply DNS patch:', dnsPatchError);
+  }
+}
+
 import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { CSVLoader } from '@langchain/community/document_loaders/fs/csv';
 import { CheerioWebBaseLoader } from '@langchain/community/document_loaders/web/cheerio';
