@@ -8,29 +8,42 @@ if (typeof dns.setServers === 'function') {
     // Set public DNS servers for dns.resolve
     dns.setServers(['8.8.8.8', '8.8.4.4']);
     
-    dns.lookup = function(hostname: string, options: any, callback: any) {
+    dns.lookup = (function(
+      hostname: string,
+      options: dns.LookupOptions | number | null | undefined | ((err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void),
+      callback?: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void
+    ) {
+      let resolvedCallback = callback;
+      let resolvedOptions = options;
       if (typeof options === 'function') {
-        callback = options;
-        options = {};
+        resolvedCallback = options as (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void;
+        resolvedOptions = {};
       }
+      
+      const cb = resolvedCallback as (
+        err: NodeJS.ErrnoException | null,
+        address: string | dns.LookupAddress[],
+        family?: number
+      ) => void;
+      const opts = (resolvedOptions || {}) as dns.LookupOptions;
       
       if (hostname && (hostname.endsWith('qdrant.io') || hostname.includes('qdrant'))) {
         dns.resolve4(hostname, (err, addresses) => {
           if (err || !addresses || addresses.length === 0) {
-            originalLookup(hostname, options, callback);
+            originalLookup(hostname, opts, cb);
           } else {
-            if (options && options.all) {
-              const results = addresses.map(addr => ({ address: addr, family: 4 }));
-              callback(null, results);
+            if (opts && opts.all) {
+              const results = addresses.map(addr => ({ address: addr, family: 4 as const }));
+              cb(null, results);
             } else {
-              callback(null, addresses[0], 4);
+              cb(null, addresses[0], 4);
             }
           }
         });
       } else {
-        originalLookup(hostname, options, callback);
+        originalLookup(hostname, opts, cb);
       }
-    } as any;
+    } as unknown as typeof dns.lookup);
   } catch (dnsPatchError) {
     console.warn('Failed to apply DNS patch:', dnsPatchError);
   }
